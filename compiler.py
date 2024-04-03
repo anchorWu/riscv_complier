@@ -8,7 +8,14 @@ class BasicInstruction:
         self.opcode = opcode
 
     @staticmethod
-    def bin_bits(num, n) -> list: 
+    def to_int(num) -> int:
+        try:
+            return int(num)
+        except ValueError:
+            return int(num, 16)
+
+    @staticmethod
+    def bin_bits(num, n) -> list:
         """
         list的第i个元素, 就是imm[i]对应的位置
         """
@@ -22,9 +29,9 @@ class BasicInstruction:
     @staticmethod
     def bin_cut(bin_bits: list, left, right) -> str:
         if right != 0:
-            return ''.join(bin_bits[left:right-1:-1]) #左闭右开区间，步长-1代表从右向左！
+            return ''.join(bin_bits[left:right - 1:-1])  # 左闭右开区间，步长-1代表从右向左！
         else:
-            return ''.join(bin_bits[left::-1]) #从left开始取到最左边
+            return ''.join(bin_bits[left::-1])  # 从left开始取到最左边
 
     def parse_bin(self) -> str:
         pass
@@ -60,7 +67,7 @@ class ITypeInstruction(BasicInstruction):
         super().__init__(opcode)
         self.rd = rd
         self.rs1 = rs1
-        self.imm = self.bin_bits(int(imm), 12)
+        self.imm = self.bin_bits(self.to_int(imm), 12)
         self.funct3 = funct3
 
     def parse_bin(self):
@@ -77,7 +84,7 @@ class STypeInstruction(BasicInstruction):
         super().__init__(opcode)
         self.rs1 = rs1
         self.rs2 = rs2
-        self.imm = self.bin_bits(int(imm), 12)
+        self.imm = self.bin_bits(self.to_int(imm), 12)
         self.funct3 = funct3
 
     def parse_bin(self):
@@ -87,7 +94,7 @@ class STypeInstruction(BasicInstruction):
             + reg_name(self.rs1) \
             + self.funct3 \
             + self.bin_cut(self.imm, 4, 0) \
-            + self.opcode   # 32位二进制
+            + self.opcode  # 32位二进制
 
 
 class SBTypeInstruction(BasicInstruction):
@@ -138,6 +145,24 @@ class BasicInstructionParser:
         self.para_num = len(args)  # 参数个数
 
 
+def split_param(basic) -> list:
+    if basic.count('#'):
+        basic = basic[:basic.index('#')]  # 切除注释
+
+    splits = []
+    for s in basic.split(','):
+        s = s.strip()
+        for t in s.split():
+            t = t.strip()
+            if t.count('('):
+                splits.append(t[:t.index('(')])  # 括号左边的
+                splits.append(t[t.index('(') + 1:t.index(')')])  # 括号里面的
+            else:
+                splits.append(t)
+
+    return splits
+
+
 def parse_single_instruction(inst, *args):  # *意为不定数量
     """
     解析单个指令
@@ -168,5 +193,13 @@ if __name__ == '__main__':
     # parse_result = parse_single_instruction('addi', 'a1', 'a0', '4')
     # parse_result = parse_single_instruction('add', 's8', 'zero', 's9')
     # parse_result = parse_single_instruction('lw', 't0', 'a1', '0')
-    parse_result = parse_single_instruction('sw', 'a1', 't0', '1')
+
+    bas = 'addi a1, a0, 0x04'
+
+    # parse_result = parse_single_instruction('addi', 'a1', 'a0', '4')
+    splits = split_param(bas)
+
+    parse_result = parse_single_instruction(*splits)
+
+    # parse_result = parse_single_instruction('sw', 'a1', 't0', '1')
     print(parse_result)
