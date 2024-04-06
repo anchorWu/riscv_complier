@@ -8,7 +8,9 @@ base_integer_instruction_table = (
     ('lw', 'I', '0000011', '010', ''),  # pass
     ('addi', 'I', '0010011', '000', ''),  # pass
     ('add', 'R', '0110011', '000', '0000000'),  # pass
-    ('sw', 'S', '0100011', '010', ''),
+    ('sw', 'S', '0100011', '010', ''), # pass
+    ('beq', 'SB', '1100011', '000', ''),
+    ('jal', 'UJ', '1101111', '', ''),
 )
 
 
@@ -66,6 +68,10 @@ register_table = (
 
 
 def reg_name(reg):
-    for i in register_table:
-        if i[1] == reg:
-            return bin(int(i[0][1:]))[2:].zfill(5)
+    if reg[0] == 'x':
+        x = reg
+    else:
+        for i in register_table:
+            if i[1] == reg:
+                x = i[0]
+    return bin(int(x[1:]))[2:].zfill(5)

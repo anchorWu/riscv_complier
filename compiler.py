@@ -1,7 +1,7 @@
 # @Author   : Pyrrho
 # @Date     : 27/03/2024
 from table import inst_dict, reg_name
-
+import sys
 
 class BasicInstruction:
     def __init__(self, opcode):
@@ -79,11 +79,11 @@ class ITypeInstruction(BasicInstruction):
             + self.opcode  # 32位二进制
 
 
-class STypeInstruction(BasicInstruction):
+class STypeInstruction(BasicInstruction): #交换rs1和rs2
     def __init__(self, rs1, rs2, imm, opcode, funct3):
         super().__init__(opcode)
-        self.rs1 = rs1
-        self.rs2 = rs2
+        self.rs1 = rs2
+        self.rs2 = rs1
         self.imm = self.bin_bits(self.to_int(imm), 12)
         self.funct3 = funct3
 
@@ -98,18 +98,27 @@ class STypeInstruction(BasicInstruction):
 
 
 class SBTypeInstruction(BasicInstruction):
-    def __init__(self, opcode, funct3):
+    def __init__(self, rs1, rs2, imm, opcode, funct3):
         super().__init__(opcode)
+        self.rs1 = rs1
+        self.rs2 = rs2
+        self.imm = self.bin_bits(self.to_int(imm), 13) 
         self.funct3 = funct3
 
-    def parse(self):
+    def parse_bin(self):
         # 处理参数
-        code = 0
-        return f'{code:x}'  # 32位二进制
+        return self.imm[12] \
+            + self.bin_cut(self.imm, 10, 5) \
+            + reg_name(self.rs2) \
+            + reg_name(self.rs1) \
+            + self.funct3 \
+            + self.bin_cut(self.imm, 4, 1) \
+            + self.imm[11] \
+            + self.opcode  # 32位二进制
 
 
 class UTypeInstruction(BasicInstruction):
-    def __init__(self, opcode):
+    def __init__(self, rd, imm, opcode):
         super().__init__(opcode)
 
     def parse(self):
@@ -119,13 +128,19 @@ class UTypeInstruction(BasicInstruction):
 
 
 class UJTypeInstruction(BasicInstruction):
-    def __init__(self, opcode):
+    def __init__(self, rd, imm, opcode):
         super().__init__(opcode)
+        self.rd = rd
+        self.imm = self.bin_bits(self.to_int(imm), 21) 
 
-    def parse(self):
-        # 处理参数
-        code = 0
-        return f'{code:x}'  # 32位二进制
+    def parse_bin(self):
+        return self.imm[20] \
+            + self.bin_cut(self.imm, 10, 1) \
+            + self.imm[11] \
+            + self.bin_cut(self.imm, 19, 12) \
+            + reg_name(self.rd) \
+            + self.opcode  # 32位二进制
+
 
 
 parsers = {
@@ -152,11 +167,11 @@ def split_param(basic) -> list:
     splits = []
     for s in basic.split(','):
         s = s.strip()
-        for t in s.split():
+        for t in s.split(): #不传参，用空格分隔
             t = t.strip()
             if t.count('('):
-                splits.append(t[:t.index('(')])  # 括号左边的
                 splits.append(t[t.index('(') + 1:t.index(')')])  # 括号里面的
+                splits.append(t[:t.index('(')])  # 括号左边的
             else:
                 splits.append(t)
 
@@ -182,24 +197,56 @@ def parse_single_instruction(inst, *args):  # *意为不定数量
 class OriginalInstructionParser:
     pass
 
+def test_single_basic():
+    bas = 'beq x24 x19 8'
+    splits = split_param(bas)
+    parse_result = parse_single_instruction(*splits)
+    print(parse_result)
 
 if __name__ == '__main__':
+    # test_single_basic()
+
+    file_name = sys.argv[1]
     # 逐个指令解析
-    # with open('file', 'r', encoding='UTF8') as rf:
-    #     for line in rf.readlines():
-    #         line = line[:line.index('#')]  # 切除注释
-    #         args = line.split(',')
+    result_list = []
+    with open(file_name, 'r', encoding='UTF8') as rf:
+        lines = rf.readlines()   
+
+    lines = [line.strip() for line in lines] #去掉每一行的前后空白
+
+    for line in lines:
+        if line == '' or line[0] == '.' or line[0] == '#': #去掉空行和标签
+            continue
+        splits = split_param(line)
+        # print(line)
+        line_result = parse_single_instruction(*splits)
+        result_list.append(line_result.__str__())
+
+    bas = 'beq x24 x19 8'
+    # bas = 'sw t0, 2(a1)'
 
     # parse_result = parse_single_instruction('addi', 'a1', 'a0', '4')
-    # parse_result = parse_single_instruction('add', 's8', 'zero', 's9')
-    # parse_result = parse_single_instruction('lw', 't0', 'a1', '0')
+    # splits = split_param(bas)
 
-    bas = 'addi a1, a0, 0x04'
-
-    # parse_result = parse_single_instruction('addi', 'a1', 'a0', '4')
-    splits = split_param(bas)
-
-    parse_result = parse_single_instruction(*splits)
-
+    # parse_result = parse_single_instruction(*splits)
     # parse_result = parse_single_instruction('sw', 'a1', 't0', '1')
-    print(parse_result)
+    
+    #打印到输出文件
+    # 前两行添加
+    line1 = 'memory_initialization_radix=16;'
+    line2 = 'memory_initialization_vector='
+    
+    # 每行末尾加逗号
+    for i in range(len(result_list)):
+        if i+1 == len(result_list) or result_list[i+1] == '':
+            # 最后一行末尾加分号
+            result_list[i] += ';'
+            break
+        else:
+            result_list[i] += ','
+
+    # 将修改后的内容写回文件
+    with open(file_name.split('.')[0]+'.coe', 'w', encoding='UTF8') as f:
+        f.write(line1 + '\n')
+        f.write(line2 + '\n')
+        f.writelines('\n'.join(result_list))
