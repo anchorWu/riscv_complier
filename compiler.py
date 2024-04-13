@@ -1,6 +1,6 @@
 # @Author   : Pyrrho
 # @Date     : 27/03/2024
-from table import inst_dict, reg_name
+from table import inst_dict, reg_name, pseudo_inst_conv
 import sys
 
 
@@ -10,7 +10,7 @@ def pre_compile(read_lines):
     """
     lines = []
     for line in read_lines:
-        if line.count('#'):
+        if '#' in line:
             line = line[:line.index('#')]  # 切除注释
         line = line.strip()  # 去掉每一行的前后空白
         if line:
@@ -28,44 +28,79 @@ class OriginalInstructionParser:
         参数接收源码，行的数组
         """
         self.label_index = {}  # 保存标签对应指令的序号
+        self.codes = lines
+        self.splits = []  # 将每个源码行转为参数列表
 
-        self.splits = self.to_splits(lines)  # 将每个源码行转为参数列表
+    def check_label(self):
+        """
+        查找 codes 中的标签，在字典中记录标签的 index
+        并且删除所有标签行
+        """
+        index = 0
+        without_label = []
+        for line in self.codes:
+            if line[0] == '.': # 是标签，记录到字典
+                label = line[:line.index(':')]
+                self.label_index[label] = index  # 字典的键是标签名，值是指令的序号
+            else:
+                without_label.append(line)
+                index += 1
+        self.codes = without_label
 
-    def to_splits(self, codes: list) -> list:
+    def pseudo(self):
+        without_pseudo = []  # 替换掉 pseudo 后的结果
+        for line in self.codes:
+            mnemonic = line
+            if ' ' in mnemonic:  # 如果包含空格
+                mnemonic = line[:mnemonic.index(' ')]
+
+            opcode = pseudo_inst_conv(mnemonic)  # 对应的替换内容
+
+            without_pseudo.append(line if opcode == mnemonic else line.replace(mnemonic, opcode))
+
+        self.codes = without_pseudo
+
+    def to_splits(self) -> list:
         """
         分割字符串，转为指令+参数的列表
         用字典记录标签对应的指令，不再保留标签
         """
         splits = []
-        index = 0
-        for line in codes:
-            if line == 'nop':
-                line = 'addi x0, x0, 0'
-            elif line[0:2] == 'j ':
-                line = 'jal x0' + line[1:]
-            if line[0] != '.':  # 不是标签，添加到列表
-                split = split_param(line)
-                splits.append(split)
-                index += 0
-            else:  # 是标签，记录到字典
-                label = line[:line.index(':')]
-                self.label_index[label] = index  # 字典的键是标签名，值是指令的序号
+        for line in self.codes:
+            # 添加到列表
+            split = split_param(line)
+            splits.append(split)
+
         return splits
 
-    def parse(self) -> list:
+    def convert(self, ) -> list:
         """
-        转为 basic code ：根据字典，替换掉引用了标签的参数
+        根据字典，替换掉引用了标签的参数
         """
-        for split in self.splits:
-            for i in range(len(split)):
-                param = split[i]
-                if param[0] == '.':
-                    split[i] = 4 * (self.label_index[param] - i)
-                    print(split[i])
-        return self.splits
 
+        for i in range(len(self.codes)):
+            line = self.codes[i]
+            if '.' in line:
+                label = line[line.index('.'):]
+                if ' ' in label:
+                    label = label[:label.index(' ')]
+                if ',' in label:
+                    label = label[:label.index(',')]
+
+                target = 4 * (self.label_index[label] - i)
+                self.codes[i] = line.replace(label, str(target))
+
+    def parse(self):
+        """
+        转为 basic code ：
+        """
+        self.check_label()  # 清理标签行
+        self.pseudo()  # 清理伪指令
+
+        self.convert()  # 替换标签的引用
 
 # original code 处理程序结束
+
 
 # 以下开始为 basic code 处理程序
 
@@ -78,7 +113,7 @@ def split_param(instruction: str) -> list:
         s = s.strip()
         for t in s.split():  # 不传参，用空格分隔
             t = t.strip()
-            if t.count('('):
+            if '(' in t:
                 splits.append(t[t.index('(') + 1:t.index(')')])  # 括号里面的
                 splits.append(t[:t.index('(')])  # 括号左边的
             else:
@@ -341,4 +376,5 @@ if __name__ == '__main__':
     # test_single_basic()
 
     # 测试文件编译
-    test_original_file(sys.argv[1])
+    # test_original_file(sys.argv[1])
+    test_original_file('arrayprocessing_v4.s')

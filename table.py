@@ -75,3 +75,18 @@ def reg_name(reg):
             if i[1] == reg:
                 x = i[0]
     return bin(int(x[1:]))[2:].zfill(5)
+
+
+pseudo_instruction_table = {
+    ('j', 'jal x0'),
+    ('nop', 'addi x0, x0, 0')
+}
+
+
+def pseudo_inst_conv(pseudo):
+
+    for i in pseudo_instruction_table:
+        if i[0] == pseudo:
+            return i[1]
+    else:
+        return pseudo
