@@ -39,6 +39,10 @@ class OriginalInstructionParser:
         splits = []
         index = 0
         for line in codes:
+            if line == 'nop':
+                line = 'addi x0, x0, 0'
+            elif line[0:2] == 'j ':
+                line = 'jal x0' + line[1:]
             if line[0] != '.':  # 不是标签，添加到列表
                 split = split_param(line)
                 splits.append(split)
@@ -57,6 +61,7 @@ class OriginalInstructionParser:
                 param = split[i]
                 if param[0] == '.':
                     split[i] = 4 * (self.label_index[param] - i)
+                    print(split[i])
         return self.splits
 
 
