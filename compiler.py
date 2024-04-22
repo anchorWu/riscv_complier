@@ -413,5 +413,5 @@ if __name__ == '__main__':
     # test_single_basic()
 
     # 测试文件编译
-    # test_original_file(sys.argv[1])
-    test_original_file('arrayprocessing_v4.s')
+    test_original_file(sys.argv[1])
+    # test_original_file('arrayprocessing_v4.s')
