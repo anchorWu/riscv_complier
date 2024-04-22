@@ -67,19 +67,23 @@ register_table = (
 )
 
 
-def reg_name(reg):
+def reg_name(reg, fill=True):
+    """
+    转换寄存器名
+    fill : 是否转为5位二进制格式
+    """
     if reg[0] == 'x':
         x = reg
     else:
         for i in register_table:
             if i[1] == reg:
                 x = i[0]
-    return bin(int(x[1:]))[2:].zfill(5)
+    return bin(int(x[1:]))[2:].zfill(5) if fill else x
 
 
 pseudo_instruction_table = {
-    ('j', 'jal x0'),
-    ('nop', 'addi x0, x0, 0')
+    ('j', ('jal', 'x0')),
+    ('nop', ('addi', 'x0', 'x0', '0'))
 }
 
 
@@ -89,4 +93,4 @@ def pseudo_inst_conv(pseudo):
         if i[0] == pseudo:
             return i[1]
     else:
-        return pseudo
+        return (pseudo,)

@@ -1,5 +1,7 @@
 # @Author   : Pyrrho
 # @Date     : 27/03/2024
+from pprint import pprint
+
 from table import inst_dict, reg_name, pseudo_inst_conv
 import sys
 
@@ -22,7 +24,7 @@ def pre_compile(read_lines):
 # 开始进入 original code 处理程序
 
 
-class OriginalInstructionParser:
+class InstructionParser:
     def __init__(self, lines: list):
         """
         参数接收源码，行的数组
@@ -30,8 +32,9 @@ class OriginalInstructionParser:
         self.label_index = {}  # 保存标签对应指令的序号
         self.codes = lines
         self.splits = []  # 将每个源码行转为参数列表
+        self.instructions = []
 
-    def check_label(self):
+    def __check_label(self):
         """
         查找 codes 中的标签，在字典中记录标签的 index
         并且删除所有标签行
@@ -39,7 +42,7 @@ class OriginalInstructionParser:
         index = 0
         without_label = []
         for line in self.codes:
-            if line[0] == '.': # 是标签，记录到字典
+            if line[0] == '.':  # 是标签，记录到字典
                 label = line[:line.index(':')]
                 self.label_index[label] = index  # 字典的键是标签名，值是指令的序号
             else:
@@ -47,57 +50,63 @@ class OriginalInstructionParser:
                 index += 1
         self.codes = without_label
 
-    def pseudo(self):
-        without_pseudo = []  # 替换掉 pseudo 后的结果
-        for line in self.codes:
-            mnemonic = line
-            if ' ' in mnemonic:  # 如果包含空格
-                mnemonic = line[:mnemonic.index(' ')]
-
-            opcode = pseudo_inst_conv(mnemonic)  # 对应的替换内容
-
-            without_pseudo.append(line if opcode == mnemonic else line.replace(mnemonic, opcode))
-
-        self.codes = without_pseudo
-
-    def to_splits(self) -> list:
+    def __to_splits(self) -> list:
         """
         分割字符串，转为指令+参数的列表
         用字典记录标签对应的指令，不再保留标签
         """
-        splits = []
         for line in self.codes:
             # 添加到列表
-            split = split_param(line)
-            splits.append(split)
+            self.splits.append(split_param(line))
 
-        return splits
+    def __handle_pseudo(self):
+        for i in range(len(self.splits)):
+            self.splits[i][0:1] = pseudo_inst_conv(self.splits[i][0])  # 对应的替换内容
 
-    def convert(self, ) -> list:
+    def __replace_label(self) -> list:
         """
         根据字典，替换掉引用了标签的参数
         """
+        for i in range(len(self.splits)):
+            split = self.splits[i]
+            for j in range(len(split)):
+                param = split[j]
+                if param[0] == '.':
+                    offset = self.label_index[param] - i
+                    split[j] = str(offset * 4)
+        return self.splits
 
-        for i in range(len(self.codes)):
-            line = self.codes[i]
-            if '.' in line:
-                label = line[line.index('.'):]
-                if ' ' in label:
-                    label = label[:label.index(' ')]
-                if ',' in label:
-                    label = label[:label.index(',')]
-
-                target = 4 * (self.label_index[label] - i)
-                self.codes[i] = line.replace(label, str(target))
+    def __handle_register(self):
+        """
+        构造出parser，用于转换寄存器名称
+        """
+        for i in range(len(self.splits)):
+            split = self.splits[i]
+            p = construct_parser(*split)
+            self.instructions.append(p)
+            self.splits[i] = p.param_list()
 
     def parse(self):
         """
         转为 basic code ：
         """
-        self.check_label()  # 清理标签行
-        self.pseudo()  # 清理伪指令
+        self.__check_label()  # 清理标签行
 
-        self.convert()  # 替换标签的引用
+        self.__to_splits()
+
+        self.__handle_pseudo()  # 转换伪指令
+
+        self.__replace_label()  # 替换标签的引用
+
+        self.__handle_register()  # 转换寄存器名
+        return self
+
+    def basic_code(self):
+        return self.splits
+
+    def machine_code(self):
+        return self.instructions
+
 
 # original code 处理程序结束
 
@@ -122,12 +131,13 @@ def split_param(instruction: str) -> list:
     return splits
 
 
-class BasicInstruction:
+class Instruction:
     """
     父类，包含功能性的方法
     """
 
-    def __init__(self, opcode):
+    def __init__(self, mnemonic, opcode):
+        self.mnemonic = mnemonic
         self.opcode = opcode
 
     @staticmethod
@@ -164,6 +174,9 @@ class BasicInstruction:
         else:
             return ''.join(bin_bits[left::-1])  # 从left开始取到最左边
 
+    def param_list(self) -> list:
+        pass
+
     def parse_bin(self) -> str:
         """
         将 basic instruction 转为 32 位二进制
@@ -180,14 +193,17 @@ class BasicInstruction:
         return self.parse_hex()
 
 
-class RTypeInstruction(BasicInstruction):
-    def __init__(self, rd, rs1, rs2, opcode, funct3, funct7):
-        super().__init__(opcode)
+class RTypeInstruction(Instruction):
+    def __init__(self, rd, rs1, rs2, mnemonic, opcode, funct3, funct7):
+        super().__init__(mnemonic, opcode)
         self.funct3 = funct3
         self.funct7 = funct7
-        self.rd = rd
-        self.rs1 = rs1
-        self.rs2 = rs2
+        self.rd = reg_name(rd, False)
+        self.rs1 = reg_name(rs1, False)
+        self.rs2 = reg_name(rs2, False)
+
+    def param_list(self):
+        return [self.mnemonic, self.rd, self.rs1, self.rs2]
 
     def parse_bin(self):
         # 构建每一部分
@@ -199,86 +215,106 @@ class RTypeInstruction(BasicInstruction):
             + self.opcode  # 32位二进制
 
 
-class ITypeInstruction(BasicInstruction):
-    def __init__(self, rd, rs1, imm, opcode, funct3):
-        super().__init__(opcode)
-        self.rd = rd
-        self.rs1 = rs1
-        self.imm = self.bin_bits(self.to_int(imm), 12)
+class ITypeInstruction(Instruction):
+    def __init__(self, rd, rs1, imm, mnemonic, opcode, funct3):
+        super().__init__(mnemonic, opcode)
+        self.rd = reg_name(rd, False)
+        self.rs1 = reg_name(rs1, False)
+        self.imm = self.to_int(imm)
         self.funct3 = funct3
 
+    def param_list(self) -> list:
+        return [self.mnemonic, self.rd, self.rs1, self.imm]
+
     def parse_bin(self):
+        imm = self.bin_bits(self.imm, 12)
         # 构建每一部分
-        return self.bin_cut(self.imm, 11, 0) \
+        return self.bin_cut(imm, 11, 0) \
             + reg_name(self.rs1) \
             + self.funct3 \
             + reg_name(self.rd) \
             + self.opcode  # 32位二进制
 
 
-class STypeInstruction(BasicInstruction):  # 交换rs1和rs2
-    def __init__(self, rs1, rs2, imm, opcode, funct3):
-        super().__init__(opcode)
-        self.rs1 = rs2
-        self.rs2 = rs1
-        self.imm = self.bin_bits(self.to_int(imm), 12)
+class STypeInstruction(Instruction):  # 交换rs1和rs2
+    def __init__(self, rs1, rs2, imm, mnemonic, opcode, funct3):
+        super().__init__(mnemonic, opcode)
+        self.rs1 = reg_name(rs2, False)
+        self.rs2 = reg_name(rs1, False)
+        self.imm = self.to_int(imm)
         self.funct3 = funct3
 
+    def param_list(self) -> list:
+        return [self.mnemonic, self.rs1, self.rs2, self.imm]
+
     def parse_bin(self):
+        imm = self.bin_bits(self.imm, 12)
         # 处理参数
-        return self.bin_cut(self.imm, 11, 5) \
+        return self.bin_cut(imm, 11, 5) \
             + reg_name(self.rs2) \
             + reg_name(self.rs1) \
             + self.funct3 \
-            + self.bin_cut(self.imm, 4, 0) \
+            + self.bin_cut(imm, 4, 0) \
             + self.opcode  # 32位二进制
 
 
-class SBTypeInstruction(BasicInstruction):
-    def __init__(self, rs1, rs2, imm, opcode, funct3):
-        super().__init__(opcode)
-        self.rs1 = rs1
-        self.rs2 = rs2
-        self.imm = self.bin_bits(self.to_int(imm), 13)
+class SBTypeInstruction(Instruction):
+    def __init__(self, rs1, rs2, imm, mnemonic, opcode, funct3):
+        super().__init__(mnemonic, opcode)
+        self.rs1 = reg_name(rs1, False)
+        self.rs2 = reg_name(rs2, False)
+        self.imm = self.to_int(imm)
         self.funct3 = funct3
 
+    def param_list(self) -> list:
+        return [self.mnemonic, self.rs1, self.rs2, self.imm]
+
     def parse_bin(self):
+        imm = self.bin_bits(self.imm, 13)
         # 处理参数
-        return self.imm[12] \
-            + self.bin_cut(self.imm, 10, 5) \
+        return imm[12] \
+            + self.bin_cut(imm, 10, 5) \
             + reg_name(self.rs2) \
             + reg_name(self.rs1) \
             + self.funct3 \
-            + self.bin_cut(self.imm, 4, 1) \
-            + self.imm[11] \
+            + self.bin_cut(imm, 4, 1) \
+            + imm[11] \
             + self.opcode  # 32位二进制
 
 
-class UTypeInstruction(BasicInstruction):
-    def __init__(self, rd, imm, opcode):
-        super().__init__(opcode)
+class UTypeInstruction(Instruction):
+    def __init__(self, rd, imm, mnemonic, opcode):
+        super().__init__(mnemonic, opcode)
+
+    def param_list(self) -> list:
+        return [self.mnemonic, self.rd, self.imm]
 
     def parse_bin(self):
         # 暂未实现
         pass
 
 
-class UJTypeInstruction(BasicInstruction):
-    def __init__(self, rd, imm, opcode):
-        super().__init__(opcode)
-        self.rd = rd
-        self.imm = self.bin_bits(self.to_int(imm), 21)
+class UJTypeInstruction(Instruction):
+    def __init__(self, rd, imm, mnemonic, opcode):
+        super().__init__(mnemonic, opcode)
+        self.rd = reg_name(rd, False)
+        self.imm = self.to_int(imm)
+
+    def param_list(self) -> list:
+        return [self.mnemonic, self.rd, self.imm]
 
     def parse_bin(self):
-        return self.imm[20] \
-            + self.bin_cut(self.imm, 10, 1) \
-            + self.imm[11] \
-            + self.bin_cut(self.imm, 19, 12) \
+        imm = self.bin_bits(self.imm, 21)
+
+        return imm[20] \
+            + self.bin_cut(imm, 10, 1) \
+            + imm[11] \
+            + self.bin_cut(imm, 19, 12) \
             + reg_name(self.rd) \
             + self.opcode  # 32位二进制
 
 
-basic_parsers = {
+type_parsers = {
     'R': RTypeInstruction,
     'I': ITypeInstruction,
     'S': STypeInstruction,
@@ -288,7 +324,7 @@ basic_parsers = {
 }
 
 
-def parse_single_basic(inst, *args):  # *意为不定数量参数
+def construct_parser(inst, *args) -> Instruction:  # *意为不定数量参数
     """
     解析单个指令
     返回一行机器指令
@@ -297,10 +333,9 @@ def parse_single_basic(inst, *args):  # *意为不定数量参数
     # 根据 inst 确定：类型、opcode、funct3、funct7
     d = inst_dict(inst)  # 获取指令的类型说明
     fmt = d.pop('fmt')
-    parser_cls = basic_parsers[fmt]
+    parser_cls = type_parsers[fmt]
 
-    red = {key: value for key, value in d.items() if value}  # 去除不需要的 key
-    del red['mnemonic']  # 也不需要
+    red = {key: value for key, value in d.items() if value}  # 去除 value 为空的 key
 
     return parser_cls(*args, **red)  # *args：把数组拆开成几个元素, **red：把字典拆开，按照键名对应进行传参
 
@@ -327,7 +362,7 @@ def test_single_basic():
     """
     bas = 'beq x24 x19 8'
     splits = split_param(bas)
-    parse_result = parse_single_basic(*splits)
+    parse_result = construct_parser(*splits)
     print(parse_result)
 
     bas = 'beq x24 x19 8'
@@ -349,13 +384,16 @@ def test_original_file(file_name):
 
     original_lines = pre_compile(read_lines)
     # 转化为 basic code
-    basic_list = OriginalInstructionParser(original_lines).parse()
+    ip = InstructionParser(original_lines).parse()
+
+    basic_list = ip.basic_code()
+    pprint(basic_list)
 
     # 逐个指令解析
-    result_list = []
-    for basic in basic_list:
-        basic_instruction = parse_single_basic(*basic)
-        result_list.append(basic_instruction.__str__())
+    result_list = [s.__str__() for s in ip.machine_code()]
+    # for basic in basic_list:
+    #     basic_instruction = construct_parser(*basic)
+    #     result_list.append(basic_instruction.__str__())
 
     comma(result_list)
 
@@ -363,11 +401,10 @@ def test_original_file(file_name):
     # 前两行添加
     line1 = 'memory_initialization_radix=16;'
     line2 = 'memory_initialization_vector='
+    result_list[0:0] = [line1, line2]
 
     # 将修改后的内容写回文件
     with open(file_name.split('.')[0] + '.coe', 'w', encoding='UTF8') as f:
-        f.write(line1 + '\n')
-        f.write(line2 + '\n')
         f.writelines('\n'.join(result_list))
 
 
